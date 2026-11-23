@@ -52,9 +52,9 @@ export function Settings() {
     } catch { /* downloads blocked; the clipboard copy below still works */ }
     try {
       await navigator.clipboard.writeText(text);
-      setBackupMsg({ ok: true, text: 'Backup downloaded and copied to the clipboard.' });
+      setBackupMsg({ ok: true, text: 'Backup copied to the clipboard, and saved as a file where this browser allows downloads.' });
     } catch {
-      setBackupMsg({ ok: true, text: 'Backup downloaded. If no file appeared, this browser blocks downloads here.' });
+      setBackupMsg({ ok: true, text: 'Backup saved as a file. If no file appeared, this page blocks downloads; use the installed app instead.' });
     }
   };
 
