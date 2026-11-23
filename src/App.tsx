@@ -39,7 +39,7 @@ export default function App() {
   }, [hydrated, s.history.length]);
 
   if (!hydrated) return <div className="boot" aria-busy="true" />;
-  if (!driver) return <><Backdrop trackId={nextRound().trackId} /><CreateDriver /></>;
+  if (!driver) return <><Backdrop trackId={nextRound().trackId} /><div className="screen"><CreateDriver /></div></>;
 
   const trackId = active?.config.trackId ?? viewing?.trackId ?? (weekend && roundById(weekend.roundId)?.trackId) ?? (s.roundId && roundById(s.roundId)?.trackId) ?? nextRound().trackId;
   const key = active ? 'race' : viewing ? `result-${viewing.id}` : weekend ? 'weekend' : tab;
