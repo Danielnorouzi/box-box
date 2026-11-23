@@ -5,14 +5,16 @@ import { VitePWA } from 'vite-plugin-pwa';
 export default defineConfig(({ mode }) => ({
   // `--mode artifact` builds a single-page preview without the service worker.
   base: mode === 'artifact' ? './' : '/',
+  resolve: mode === 'artifact' ? { alias: { 'virtual:pwa-register': '/src/pwa-stub.ts' } } : undefined,
+  build: mode === 'artifact' ? { rollupOptions: { output: { inlineDynamicImports: true } } } : undefined,
   plugins: [
     react(),
     mode !== 'artifact' && VitePWA({
-      registerType: 'autoUpdate',
+      registerType: 'prompt',
       includeAssets: ['favicon.svg', 'apple-touch-icon.png'],
       manifest: {
-        name: 'Pit Wall',
-        short_name: 'Pit Wall',
+        name: 'Box Box',
+        short_name: 'Box Box',
         description: 'Study sessions run as Formula 1 races.',
         theme_color: '#0d0f12',
         background_color: '#0d0f12',

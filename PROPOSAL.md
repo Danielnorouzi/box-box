@@ -1,7 +1,6 @@
-# Pit Wall — data model & structure (proposal)
+# Box Box — data model & structure
 
-Status: Phase 1 built against this. Phases 2–6 entities are sketched so Phase 1 doesn't paint us
-into a corner; they are not implemented and are open to change.
+Status: Phases 1–6 built. `src/types.ts` is the source of truth; this file explains it.
 
 ## Core idea
 
@@ -61,7 +60,12 @@ interface PersistedState {          // zustand persist → localStorage key "pit
 
 Derived, never stored: `ClockState` (focus/sim time, phase, laps), standings, gaps.
 
-### Later phases (sketch)
+### Phases 2–6 (built)
+
+Ticket, ActivityEntry, Settings and the 2026 Round list are in `src/types.ts` and `src/data/calendar.ts`.
+Sync merge rules are in `src/sync/merge.ts`. The original sketch is kept below for reference.
+
+### Original sketch
 
 ```ts
 // Phase 2 — tickets: a unit of study work you "enter" into a race
@@ -73,8 +77,8 @@ interface Round { round; trackId; name; raceDate: string; sprint: boolean }
 // Phase 6 — sync: same PersistedState pushed to a backend; event logs merge by id
 ```
 
-Storage: Phase 1 uses localStorage (state is a few KB). Move to IndexedDB in Phase 5 when the
-activity log grows; the persist adapter is the only thing that changes.
+Storage: IndexedDB (`idb-keyval`, key `boxbox:v2`), falling back to localStorage when IndexedDB is
+blocked. Phase 1's `pitwall:v1` localStorage data is imported and migrated on first open.
 
 ## Folder structure
 
@@ -83,13 +87,16 @@ pit-wall/
 ├─ PROPOSAL.md                 this file
 ├─ scripts/build-track.mjs     GeoJSON → SVG geometry (add circuits here)
 ├─ src/
-│  ├─ data/                    static: teams, tracks (+ generated *.geom.ts), calendar later
+│  ├─ data/                    static: teams, tracks (+ generated geometry.ts), 2026 calendar
 │  ├─ sim/                     pure, framework-free: rng, rules, clock (event log → state), standings
 │  ├─ store/                   zustand store + persistence
 │  ├─ features/
 │  │  ├─ garage/               race setup + season results
 │  │  ├─ race/                 track map, timing tower, lap clock, controls
-│  │  └─ result/               classification after the flag
+│  │  ├─ result/               classification after the flag
+│  │  ├─ season/ tickets/ logbook/ settings/
+│  ├─ sync/                    merge (pure) + client
+├─ server/server.mjs           optional sync server, no dependencies
 │  ├─ hooks/  lib/  styles/
 │  └─ App.tsx  main.tsx  types.ts
 ```

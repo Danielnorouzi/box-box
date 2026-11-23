@@ -1,7 +1,6 @@
 export type TeamId =
   | 'mclaren' | 'ferrari' | 'mercedes' | 'redbull' | 'aston' | 'alpine'
   | 'williams' | 'rb' | 'haas' | 'audi' | 'cadillac';
-export type TrackId = 'lusail';
 export type RaceFormat = 'sprint' | 'gp';
 
 export type RaceEvent =
@@ -12,7 +11,8 @@ export type RaceEvent =
   | { type: 'finish'; t: number };
 
 export interface RaceConfig {
-  trackId: TrackId;
+  trackId: string;
+  roundId: string;
   format: RaceFormat;
   durationMs: number;
   laps: number;
@@ -23,17 +23,23 @@ export interface RaceConfig {
   gridSlot: number;
   teamId: TeamId;
   subject: string;
+  ticketId?: string;
 }
 
 export interface ActiveRace {
   id: string;
   config: RaceConfig;
   events: RaceEvent[];
+  updatedAt: number;
 }
+
+export interface ClassifiedCar { code: string; teamId: TeamId; you: boolean; gap: string }
 
 export interface RaceResult {
   id: string;
-  trackId: TrackId;
+  trackId: string;
+  roundId: string;
+  ticketId?: string;
   format: RaceFormat;
   subject: string;
   teamId: TeamId;
@@ -50,5 +56,37 @@ export interface RaceResult {
   vscUsedMs: number;
   cleanLaps: number;
   bestLapF1Ms: number;
-  classification: { code: string; teamId: TeamId; you: boolean; gap: string }[];
+  classification: ClassifiedCar[];
 }
+
+/** Phase 2: a piece of study work you enter into races. */
+export interface Ticket {
+  id: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+  doneAt?: number;
+  deleted?: boolean; // tombstone, so deletes survive sync
+}
+
+/** Phase 5: everything that happened, for the logbook. */
+export type ActivityKind =
+  | 'race_start' | 'vsc' | 'green' | 'finish' | 'dnf' | 'ticket_add' | 'ticket_done' | 'ticket_reopen';
+
+export interface ActivityEntry {
+  id: string;
+  t: number;
+  kind: ActivityKind;
+  raceId?: string;
+  ticketId?: string;
+  text: string;
+}
+
+export interface Settings {
+  sound: boolean;
+  wakeLock: boolean;
+  syncUrl: string;
+  syncKey: string;
+}
+
+export type Tab = 'race' | 'season' | 'tickets' | 'logbook' | 'settings';

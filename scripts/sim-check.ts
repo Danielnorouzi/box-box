@@ -8,9 +8,9 @@ function race(seed: number, grid: number, durMin: number, laps: number, events: 
   const durationMs = durMin * MIN, vscBudgetMs = durationMs * VSC_BUDGET_SHARE;
   return {
     id: 'x',
-    config: { trackId: 'lusail', format: 'gp', durationMs, laps, lapMs: durationMs / laps, vscBudgetMs,
+    config: { trackId: 'qa-2004', roundId: '2026-qatar', format: 'gp', durationMs, laps, lapMs: durationMs / laps, vscBudgetMs,
       stopLimitMs: stopLimitFor(vscBudgetMs), seed, gridSlot: grid, teamId: 'williams', subject: '' },
-    events: events(0, durationMs / laps),
+    events: events(0, durationMs / laps), updatedAt: 0,
   };
 }
 const scen: Record<string, (t0: number, lap: number) => RaceEvent[]> = {

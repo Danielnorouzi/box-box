@@ -1,6 +1,6 @@
 import type { RaceConfig, TeamId } from '../types';
 import { TEAMS } from '../data/teams';
-import { TRACKS } from '../data/tracks';
+import { trackOf } from '../data/tracks';
 import { GRID_GAP_LAPS, MAX_PUSH, STREAK_FULL } from './rules';
 import { hash, rng } from './rng';
 import type { ClockState } from './clock';
@@ -77,7 +77,7 @@ export function buildField(cfg: RaceConfig): Car[] {
 /** Your laps so far, including the one in progress (last entry, if any). */
 export function yourLaps(cfg: RaceConfig, clock: ClockState): Lap[] {
   const { lapMs, laps: total, seed } = cfg;
-  const ref = TRACKS[cfg.trackId].refLapMs;
+  const ref = trackOf(cfg.trackId).refLapMs;
   const done = Math.min(total, Math.ceil(clock.focusMs / lapMs - 1e-9));
   const out: Lap[] = [];
   let streak = 0;
@@ -112,7 +112,7 @@ function rivalDistance(cfg: RaceConfig, car: Car, simMs: number) {
 export function standings(cfg: RaceConfig, clock: ClockState): { rows: StandingRow[]; laps: Lap[] } {
   const field = buildField(cfg);
   const laps = yourLaps(cfg, clock);
-  const ref = TRACKS[cfg.trackId].refLapMs / 1000;
+  const ref = trackOf(cfg.trackId).refLapMs / 1000;
   const raw = field.map(car => ({
     car,
     distance: car.isYou ? yourDistance(cfg, clock, laps) : rivalDistance(cfg, car, clock.simMs),

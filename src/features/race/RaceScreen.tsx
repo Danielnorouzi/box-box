@@ -4,7 +4,10 @@ import { useRace } from '../../store/raceStore';
 import { useNow } from '../../hooks/useNow';
 import { deriveClock } from '../../sim/clock';
 import { standings } from '../../sim/standings';
-import { TRACKS } from '../../data/tracks';
+import { trackOf } from '../../data/tracks';
+import { roundById } from '../../data/calendar';
+import { useWakeLock } from '../../hooks/useWakeLock';
+import { lightBeep, lightsOut, unlock } from '../../lib/sound';
 import { clock as fmt, lapTime } from '../../lib/format';
 import type { ActiveRace } from '../../types';
 import { TrackMap } from './TrackMap';
@@ -12,10 +15,11 @@ import { TimingTower } from './TimingTower';
 import { IconBack, IconFlag, IconPause, IconPlay, IconStop } from '../icons';
 
 export function RaceScreen({ race }: { race: ActiveRace }) {
-  const { push, settle, leaveGrid } = useRace();
+  const { push, settle, leaveGrid, settings } = useRace();
   const now = useNow(40);
   const cfg = race.config;
-  const track = TRACKS[cfg.trackId];
+  const track = trackOf(cfg.trackId);
+  const round = roundById(cfg.roundId);
   const c = useMemo(() => deriveClock(race, now), [race, now]);
   const { rows, laps } = useMemo(() => standings(cfg, c), [cfg, c]);
   const you = rows.find(r => r.car.isYou)!;
@@ -39,21 +43,29 @@ export function RaceScreen({ race }: { race: ActiveRace }) {
   // Tab title doubles as a glanceable timer.
   useEffect(() => {
     document.title =
-      c.phase === 'grid' ? 'On the grid · Pit Wall'
-        : paused ? `${c.phase === 'vsc' ? 'VSC' : 'STOPPED'} · P${you.position} · Pit Wall`
+      c.phase === 'grid' ? 'On the grid · Box Box'
+        : paused ? `${c.phase === 'vsc' ? 'VSC' : 'STOPPED'} · P${you.position} · Box Box`
           : `L${lapNo}/${cfg.laps} · ${fmt(lapLeft)} · P${you.position}`;
-    return () => { document.title = 'Pit Wall'; };
+    return () => { document.title = 'Box Box'; };
   }, [c.phase, paused, lapNo, cfg.laps, lapLeft, you.position]);
 
   // Start lights: five reds, one a second, then a random hold before lights out.
   const [lights, setLights] = useState(-1);
   const timers = useRef<number[]>([]);
+  useWakeLock(settings.wakeLock && (c.phase === 'green' || paused || lights >= 0));
   useEffect(() => () => timers.current.forEach(clearTimeout), []);
   const startSequence = () => {
+    if (settings.sound) unlock(); // must happen inside the tap
     setLights(0);
-    for (let i = 1; i <= 5; i++) timers.current.push(window.setTimeout(() => setLights(i), i * 900));
+    for (let i = 1; i <= 5; i++) {
+      timers.current.push(window.setTimeout(() => { setLights(i); if (useRace.getState().settings.sound) lightBeep(i); }, i * 900));
+    }
     const hold = 5 * 900 + 500 + Math.random() * 1800;
-    timers.current.push(window.setTimeout(() => { setLights(-1); push('start'); }, hold));
+    timers.current.push(window.setTimeout(() => {
+      setLights(-1);
+      push('start');
+      if (useRace.getState().settings.sound) lightsOut();
+    }, hold));
   };
 
   // Retire needs a second press within four seconds.
@@ -100,12 +112,10 @@ export function RaceScreen({ race }: { race: ActiveRace }) {
             <dt>LAST LAP</dt>
             <dd className={last && last.clean && last.f1Ms === best ? 'purple' : undefined}>{last ? lapTime(last.f1Ms) : '–'}</dd>
           </dl>
-          {cfg.subject && (
-            <dl className="subject">
-              <dt>ON TRACK</dt>
-              <dd title={cfg.subject}>{cfg.subject}</dd>
-            </dl>
-          )}
+          <dl className="subject">
+            <dt>{(round?.name ?? track.name).toUpperCase()}</dt>
+            <dd title={cfg.subject}>{cfg.subject || 'Free session'}</dd>
+          </dl>
         </section>
       </div>
 

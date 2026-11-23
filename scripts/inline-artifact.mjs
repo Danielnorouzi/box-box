@@ -6,7 +6,7 @@ const css = files.filter(f => f.endsWith('.css')).map(f => readFileSync(`${dir}/
 const js = files.filter(f => f.endsWith('.js')).map(f => readFileSync(`${dir}/${f}`, 'utf8')).join('\n');
 const icon = 'data:image/svg+xml;base64,' + readFileSync('public/favicon.svg').toString('base64');
 const out = `<meta charset="utf-8">
-<title>Pit Wall</title>
+<title>Box Box</title>
 <meta name="theme-color" content="#0d0f12">
 <link rel="icon" href="${icon}">
 <style>${css}</style>
