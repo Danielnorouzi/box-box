@@ -1,6 +1,6 @@
 // 2026 calendar. Bahrain and Saudi Arabia were cancelled in March 2026 (Middle East conflict),
 // leaving 22 Grands Prix. Dates are race day; `start` is the Friday of the weekend.
-// Round numbers are left out on purpose: published sources disagree after the cancellations.
+// Round numbers count the 22 races that run (sources confirm no replacement rounds were added).
 export interface Round {
   id: string; // stable key, e.g. "2026-qatar"
   name: string; // Grand Prix name
@@ -42,6 +42,9 @@ export const CALENDAR: Round[] = [
 ];
 
 export const RACES = CALENDAR.filter(x => !x.cancelled);
+export const roundNumber = (id: string) => RACES.findIndex(x => x.id === id) + 1;
+/** 0 at the opener, 1 at the finale: drives rival development. */
+export const seasonProgress = (id: string) => Math.max(0, roundNumber(id) - 1) / (RACES.length - 1);
 export const roundById = (id: string) => CALENDAR.find(x => x.id === id);
 
 const day = (iso: string) => new Date(iso + 'T23:59:59').getTime();

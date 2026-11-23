@@ -8,14 +8,15 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "sim:check": "rolldown scripts/sim-check.ts --platform node -o node_modules/.cache/sim-check.mjs && node node_modules/.cache/sim-check.mjs",
-    "build:artifact": "tsc -b && vite build --mode artifact --outDir dist-artifact && node scripts/inline-artifact.mjs"
+    "build:artifact": "tsc -b && vite build --mode artifact --outDir dist-artifact && node scripts/inline-artifact.mjs",
+    "balance:check": "rolldown scripts/balance-check.ts --platform node -o node_modules/.cache/balance.mjs && node node_modules/.cache/balance.mjs"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.9",
     "@react-three/fiber": "^9.8.2",
     "framer-motion": "^14.14.0",
     "idb-keyval": "^6.3.0",
+    "qrcode-generator": "^2.0.4",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "three": "^0.187.0",

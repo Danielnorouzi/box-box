@@ -99,3 +99,48 @@ export function lightsOut() {
   n.connect(bp).connect(ng).connect(master);
   n.start(t);
 }
+
+/** Team radio: the click and hiss of a channel opening, then a short tone. */
+export function radioChirp(urgent = false) {
+  const c = unlock();
+  if (!c) return;
+  const t = c.currentTime;
+  const n = c.createBufferSource();
+  n.buffer = noiseBuffer(c, 0.35);
+  const bp = c.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 2400; bp.Q.value = 1.4;
+  const g = c.createGain();
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.12, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.3);
+  n.connect(bp).connect(g).connect(c.destination); n.start(t);
+  const o = c.createOscillator(); const og = c.createGain();
+  o.type = 'sine'; o.frequency.setValueAtTime(urgent ? 1320 : 990, t + 0.05);
+  if (urgent) o.frequency.setValueAtTime(990, t + 0.15);
+  og.gain.setValueAtTime(0.0001, t + 0.05); og.gain.exponentialRampToValueAtTime(0.08, t + 0.07); og.gain.exponentialRampToValueAtTime(0.0001, t + (urgent ? 0.3 : 0.2));
+  o.connect(og).connect(c.destination); o.start(t + 0.05); o.stop(t + 0.35);
+}
+
+/** Car coming to a stop: engine note falling away. */
+export function engineDie() {
+  const c = unlock();
+  if (!c) return;
+  const t = c.currentTime;
+  const o = c.createOscillator(); o.type = 'sawtooth';
+  o.frequency.setValueAtTime(220, t); o.frequency.exponentialRampToValueAtTime(30, t + 2.2);
+  const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.setValueAtTime(1200, t); lp.frequency.exponentialRampToValueAtTime(200, t + 2.2);
+  const g = c.createGain(); g.gain.setValueAtTime(0.25, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 2.4);
+  o.connect(lp).connect(g).connect(c.destination); o.start(t); o.stop(t + 2.5);
+}
+
+/** Cork pop for the podium. */
+export function corkPop() {
+  const c = unlock();
+  if (!c) return;
+  const t = c.currentTime;
+  const o = c.createOscillator(); o.type = 'sine';
+  o.frequency.setValueAtTime(600, t); o.frequency.exponentialRampToValueAtTime(90, t + 0.08);
+  const g = c.createGain(); g.gain.setValueAtTime(0.4, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
+  o.connect(g).connect(c.destination); o.start(t); o.stop(t + 0.15);
+  const n = c.createBufferSource(); n.buffer = noiseBuffer(c, 1.2);
+  const hp = c.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 3000;
+  const ng = c.createGain(); ng.gain.setValueAtTime(0.0001, t + 0.05); ng.gain.exponentialRampToValueAtTime(0.08, t + 0.15); ng.gain.exponentialRampToValueAtTime(0.0001, t + 1.2);
+  n.connect(hp).connect(ng).connect(c.destination); n.start(t + 0.05);
+}

@@ -1,7 +1,7 @@
 import { get, set, del } from 'idb-keyval';
 import type { StateStorage } from 'zustand/middleware';
 
-export const STORE_KEY = 'boxbox:v2';
+export const STORE_KEY = 'boxbox:v2'; // key unchanged; the store version inside handles migration
 const LEGACY_KEY = 'pitwall:v1';
 
 /**

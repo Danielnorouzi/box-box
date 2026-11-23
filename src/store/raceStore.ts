@@ -1,217 +1,264 @@
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import type {
-  ActiveRace, ActivityEntry, ActivityKind, RaceEvent, RaceFormat, RaceResult, Settings, Tab, TeamId, Ticket,
+  ActiveRace, ActivityId, PlayerDriver, RaceEvent, RaceResult, RndArea, Settings, Tab, TeamId, TyreId, Weekend,
 } from '../types';
-import { trackOf } from '../data/tracks';
+import { DRIVER, RND, TYRES, pointsFor, ABSENCE } from '../config/balance';
 import { nextRound, roundById } from '../data/calendar';
-import { FORMATS, MIN, VSC_BUDGET_SHARE, pointsFor, stopLimitFor } from '../sim/rules';
 import { deriveClock } from '../sim/clock';
-import { standings } from '../sim/standings';
-import { gap, minutes } from '../lib/format';
+import { qualify, standings } from '../sim/race';
+import { capRemaining, creditsFor, dayKey, rndCost } from '../sim/progression';
+import { raceConfig, weatherFor, type CareerSnapshot } from '../sim/setup';
+import { gap } from '../lib/format';
 import { uid } from '../lib/id';
+import { makeTicket } from '../lib/ticket';
+import {
+  type Ledger, type Purchase, balance, rndLevels, seasonCapLeft, seasonNumber, streak, teamOf, wetRaceXp,
+} from './derive';
 import { STORE_KEY, idbStorage } from './storage';
 
-interface Setup { format: RaceFormat; durationMin: number; subject: string; roundId: string; ticketId?: string }
+export type SyncedState = Ledger & { active: ActiveRace | null };
 
-export interface SyncedState {
-  teamId: TeamId;
-  active: ActiveRace | null;
-  history: RaceResult[];
-  tickets: Ticket[];
-  activity: ActivityEntry[];
-}
+export const QUALI_MS = 5 * 60_000;
+export const PRACTICE_MS = 5 * 60_000;
 
 interface State extends SyncedState {
   hydrated: boolean;
-  lastLength: number;
-  roundId: string | null; // chosen round, null = follow the calendar
-  viewingResultId: string | null;
   tab: Tab;
+  roundId: string | null;
+  weekendId: string | null; // the weekend you're in, until the race is filed
+  viewingResultId: string | null;
   settings: Settings;
   lastSyncAt: number | null;
-  draftTicketId: string | null; // ticket chosen for the next race
+  lastLaps: number;
+  practiceStartedAt: number | null;
+  qualiStartedAt: number | null;
+  qualiAwayAt: number | null;
 
-  setDraftTicket: (id: string | null) => void;
-  setTeam: (id: TeamId) => void;
+  saveDriver: (d: PlayerDriver) => void;
   setTab: (t: Tab) => void;
   pickRound: (id: string | null) => void;
   setSettings: (s: Partial<Settings>) => void;
-  lineUp: (s: Setup) => void;
+
+  openWeekend: (roundId: string, laps: number) => void;
+  leaveWeekend: () => void;
+  ripTicket: () => void;
+  startPractice: () => void;
+  finishPractice: (plan: string) => void;
+  cancelPractice: () => void;
+  startQuali: () => void;
+  qualiAway: (away: boolean) => void;
+  finishQuali: (aborted: boolean) => void;
+  lineUp: (tyre: TyreId) => void;
   leaveGrid: () => void;
-  push: (type: RaceEvent['type']) => void;
+  push: (e: RaceEvent['type'], tyre?: TyreId) => void;
   settle: (now?: number) => void;
   openResult: (id: string) => void;
   closeResult: () => void;
 
-  addTicket: (title: string) => string | null;
-  renameTicket: (id: string, title: string) => void;
-  setTicketDone: (id: string, done: boolean) => void;
-  deleteTicket: (id: string) => void;
+  buyRnd: (area: RndArea) => string | null;
+  logActivity: (a: ActivityId, minutes: number) => { counted: number };
+  removeActivity: (id: string) => void;
+  signContract: (team: TeamId) => void;
+  declineOffer: (team: TeamId) => void;
 
   applySynced: (s: SyncedState, at: number) => void;
   resetAll: () => void;
 }
 
-const ACTIVITY_CAP = 3000;
-
-const log = (kind: ActivityKind, text: string, extra: Partial<ActivityEntry> = {}): ActivityEntry =>
-  ({ id: uid(), t: Date.now(), kind, text, ...extra });
-
-const initial = {
-  teamId: 'williams' as TeamId,
-  lastLength: 60,
-  roundId: null,
-  active: null,
-  history: [],
-  tickets: [],
-  activity: [],
-  viewingResultId: null,
-  tab: 'race' as Tab,
-  settings: { sound: true, wakeLock: true, syncUrl: '', syncKey: '' },
-  lastSyncAt: null,
-  draftTicketId: null as string | null,
+const ledgerInit: SyncedState = {
+  driver: null, driverUpdatedAt: 0, history: [], weekends: [], purchases: [], contracts: [], declined: [], activity: [], active: null,
 };
+
+const uiInit = {
+  tab: 'garage' as Tab, roundId: null, weekendId: null, viewingResultId: null, lastSyncAt: null, lastLaps: 10,
+  practiceStartedAt: null, qualiStartedAt: null, qualiAwayAt: null,
+  settings: { sound: true, haptics: true, wakeLock: true, quality: 'auto', syncUrl: '', syncKey: '' } as Settings,
+};
+
+export const careerOf = (s: SyncedState): CareerSnapshot => ({
+  teamId: teamOf(s), rnd: rndLevels(s), activity: s.activity, archetype: s.driver?.archetype ?? 'racer',
+  wetRaceXp: wetRaceXp(s), code: s.driver?.code ?? 'YOU', number: s.driver?.number ?? 7,
+});
 
 export const useRace = create<State>()(
   persist(
     (set, get) => {
-      const addLog = (e: ActivityEntry) =>
-        set(s => ({ activity: [e, ...s.activity].slice(0, ACTIVITY_CAP) }));
+      const weekend = () => get().weekends.find(w => w.id === get().weekendId) ?? null;
+      const patchWeekend = (p: Partial<Weekend>) =>
+        set(s => ({ weekends: s.weekends.map(w => (w.id === s.weekendId ? { ...w, ...p } : w)) }));
 
       return {
-        ...initial,
+        ...ledgerInit,
+        ...uiInit,
         hydrated: false,
 
-        setDraftTicket: draftTicketId => set({ draftTicketId }),
-        setTeam: teamId => set({ teamId }),
+        saveDriver: d => set({ driver: d, driverUpdatedAt: Date.now() }),
         setTab: tab => set({ tab, viewingResultId: null }),
-        pickRound: roundId => set({ roundId, tab: 'race' }),
+        pickRound: roundId => set({ roundId, tab: 'garage' }),
         setSettings: p => set(s => ({ settings: { ...s.settings, ...p } })),
 
-        lineUp: ({ format, durationMin, subject, roundId, ticketId }) => {
-          const round = roundById(roundId) ?? nextRound();
-          const track = trackOf(round.trackId);
-          const durationMs = durationMin * MIN;
-          const laps = FORMATS[format].laps(track.laps);
+        openWeekend: (roundId, laps) => {
           const seed = (Math.random() * 2 ** 32) >>> 0;
-          const vscBudgetMs = Math.round(durationMs * VSC_BUDGET_SHARE);
-          set({
-            lastLength: durationMin,
-            viewingResultId: null,
-            active: {
-              id: uid(),
-              events: [],
-              updatedAt: Date.now(),
-              config: {
-                trackId: track.id, roundId: round.id, format, durationMs, laps, lapMs: durationMs / laps,
-                vscBudgetMs, stopLimitMs: stopLimitFor(vscBudgetMs),
-                seed, gridSlot: 6 + (seed % 10), teamId: get().teamId, subject: subject.trim(), ticketId,
-              },
-            },
+          const round = roundById(roundId) ?? nextRound();
+          const w: Weekend = {
+            id: uid(), roundId: round.id, laps, seed, createdAt: Date.now(),
+            weather: weatherFor(round.trackId, seed), ticket: makeTicket(round.id, seed),
+          };
+          set(s => ({ weekends: [w, ...s.weekends], weekendId: w.id, lastLaps: laps, viewingResultId: null }));
+        },
+        leaveWeekend: () => set({ weekendId: null, practiceStartedAt: null, qualiStartedAt: null, qualiAwayAt: null }),
+        ripTicket: () => patchWeekend({ rippedAt: Date.now() }),
+
+        startPractice: () => set({ practiceStartedAt: Date.now() }),
+        cancelPractice: () => set({ practiceStartedAt: null }),
+        finishPractice: plan => { patchWeekend({ practice: { plan: plan.trim(), doneAt: Date.now() } }); set({ practiceStartedAt: null }); },
+
+        startQuali: () => set({ qualiStartedAt: Date.now(), qualiAwayAt: null }),
+        qualiAway: away => {
+          const s = get();
+          if (!s.qualiStartedAt) return;
+          if (away) set({ qualiAwayAt: Date.now() });
+          else if (s.qualiAwayAt) {
+            // Leaving during a flying lap deletes it, past the same short grace as the race.
+            const ms = Date.now() - s.qualiAwayAt;
+            set({ qualiAwayAt: null });
+            if (ms > ABSENCE.graceMs) get().finishQuali(true);
+          }
+        },
+        finishQuali: aborted => {
+          const s = get();
+          const w = weekend();
+          if (!w || !s.qualiStartedAt) return;
+          const focusMs = aborted ? 0 : Math.min(Date.now() - s.qualiStartedAt, QUALI_MS);
+          const base = raceConfig({ career: careerOf(s), roundId: w.roundId, laps: w.laps, seed: w.seed, weather: w.weather, gridSlot: 1, startTyre: 'medium', weekendId: w.id });
+          const q = qualify(base, aborted);
+          patchWeekend({ quali: { grid: q.grid, focusMs, aborted, lapF1Ms: aborted ? 0 : q.lapF1Ms, doneAt: Date.now() } });
+          set({ qualiStartedAt: null, qualiAwayAt: null });
+        },
+
+        lineUp: tyre => {
+          const s = get();
+          const w = weekend();
+          if (!w) return;
+          const fieldSize = teamOf(s) === 'kestrel' ? 23 : 22;
+          const cfg = raceConfig({
+            career: careerOf(s), roundId: w.roundId, laps: w.laps, seed: w.seed, weather: w.weather,
+            gridSlot: w.quali ? Math.min(fieldSize, w.quali.grid) : fieldSize, startTyre: tyre, weekendId: w.id, plan: w.practice?.plan,
           });
+          set({ active: { id: uid(), config: cfg, events: [], updatedAt: Date.now() } });
         },
+        leaveGrid: () => { const a = get().active; if (a && a.events.length === 0) set({ active: null }); },
 
-        leaveGrid: () => {
-          const a = get().active;
-          if (a && a.events.length === 0) set({ active: null });
-        },
-
-        push: type => {
+        push: (type, tyre) => {
           const a = get().active;
           if (!a) return;
           const t = Date.now();
-          set({ active: { ...a, events: [...a.events, { type, t }], updatedAt: t } });
-          const round = roundById(a.config.roundId);
-          const what = a.config.subject || 'free session';
-          if (type === 'start') addLog(log('race_start', `Lights out at the ${round?.name ?? 'Grand Prix'}: ${what}`, { raceId: a.id, ticketId: a.config.ticketId }));
-          if (type === 'vsc_on') addLog(log('vsc', 'VSC called', { raceId: a.id }));
-          if (type === 'vsc_off') addLog(log('green', 'Back to green', { raceId: a.id }));
-          get().settle();
+          const ev = (type === 'pit_out' ? { type, t, tyre: tyre ?? 'medium' } : { type, t }) as RaceEvent;
+          set({ active: { ...a, events: [...a.events, ev], updatedAt: t } });
+          // Filing happens on the race screen after the flag or DNF animation (or on next open).
         },
 
-        /** If the race has ended (flag, retirement, or a stop over the limit), file the result. */
         settle: (now = Date.now()) => {
-          const a = get().active;
+          const s = get();
+          const a = s.active;
           if (!a) return;
-          const clock = deriveClock(a, now);
-          if (clock.phase !== 'finished' && clock.phase !== 'dnf') return;
-          const { rows, laps } = standings(a.config, clock);
+          const c = deriveClock(a, now);
+          if (c.phase !== 'finished' && c.phase !== 'dnf') return;
+          const cfg = a.config;
+          const { rows, laps } = standings(cfg, c);
           const you = rows.find(r => r.car.isYou)!;
-          const dnf = clock.phase === 'dnf';
+          const dnf = c.phase === 'dnf';
+          const position = dnf ? rows.length : you.position;
+          const points = dnf ? 0 : pointsFor(position);
+          const stints = c.stints;
+          const span = (i: number) => (stints[i + 1]?.fromFocusMs ?? c.focusMs) - stints[i].fromFocusMs;
+          const tyreMult = c.focusMs ? stints.reduce((m, st, i) => m + TYRES[st.tyre].mult * span(i), 0) / c.focusMs : 1;
+          const overLong = c.stops.some(st => st.overMs > 0);
+          const cr = creditsFor({
+            focusMs: c.focusMs, finished: !dnf, points, clean: c.strikes === 0 && !overLong,
+            rain: cfg.weather === 'rain', tyreMult, streak: streak(s) + 1,
+          });
           const clean = laps.filter(l => l.clean);
-          const ordered = [...rows.filter(r => !(dnf && r.car.isYou)), ...(dnf ? [you] : [])];
+          const order = rows.filter(r => !(r.car.isYou && dnf)).concat(dnf ? [you] : []);
           const result: RaceResult = {
-            id: a.id, trackId: a.config.trackId, roundId: a.config.roundId, ticketId: a.config.ticketId,
-            format: a.config.format, subject: a.config.subject,
-            teamId: a.config.teamId, startedAt: clock.startedAt ?? now, endedAt: clock.endedAt ?? now,
-            status: dnf ? 'dnf' : 'finished', dnfReason: clock.dnfReason,
-            position: dnf ? rows.length : you.position, gridSlot: a.config.gridSlot,
-            // A Sprint only scores on a sprint weekend; elsewhere it is practice.
-            points: dnf || (a.config.format === 'sprint' && !roundById(a.config.roundId)?.sprint) ? 0 : pointsFor(a.config.format, you.position),
-            lapsCompleted: Math.floor(clock.focusMs / a.config.lapMs + 1e-9), laps: a.config.laps,
-            focusMs: clock.focusMs, vscUsedMs: clock.vscUsedMs, cleanLaps: clean.length,
+            id: a.id, weekendId: cfg.weekendId, roundId: cfg.roundId, trackId: cfg.trackId, teamId: cfg.teamId, weather: cfg.weather,
+            startedAt: c.startedAt ?? now, endedAt: c.endedAt ?? now,
+            status: dnf ? 'dnf' : 'finished', dnfReason: c.dnfReason, position, gridSlot: cfg.gridSlot, points,
+            laps: cfg.laps, lapsCompleted: Math.floor(c.focusMs / cfg.lapMs + 1e-9), focusMs: c.focusMs,
+            stops: c.stops.length, tyres: stints.map(x => x.tyre), strikes: c.strikes, overLongPit: overLong,
             bestLapF1Ms: clean.length ? Math.min(...clean.map(l => l.f1Ms)) : 0,
-            classification: ordered.map((r, i) => ({
-              code: r.car.code, teamId: r.car.teamId, you: r.car.isYou,
-              gap: dnf && r.car.isYou ? 'DNF' : i === 0 ? 'Winner'
-                : r.lapsDown > 0 ? `+${r.lapsDown} lap${r.lapsDown > 1 ? 's' : ''}` : gap(r.gapToLeaderS),
-            })),
+            credits: cr.total, creditLines: cr.lines,
+            classification: order.map((r, i) => {
+              const out = r.dnf || (r.car.isYou && dnf);
+              return {
+                code: r.car.code, teamId: r.car.teamId, you: r.car.isYou, number: r.car.number, dnf: out,
+                gap: out ? 'DNF' : i === 0 ? 'Winner' : r.lapsDown > 0 ? `+${r.lapsDown} lap${r.lapsDown > 1 ? 's' : ''}` : gap(r.gapToLeaderS),
+              };
+            }),
           };
-          set(s => ({ active: null, history: [result, ...s.history], viewingResultId: result.id }));
-          addLog(dnf
-            ? log('dnf', `DNF on lap ${Math.min(result.laps, result.lapsCompleted + 1)} after ${minutes(result.focusMs)} of focus`, { raceId: a.id, ticketId: a.config.ticketId, t: result.endedAt })
-            : log('finish', `P${result.position}, ${result.points} pts, ${minutes(result.focusMs)} of focus`, { raceId: a.id, ticketId: a.config.ticketId, t: result.endedAt }));
+          set(st => ({ active: null, history: [result, ...st.history], viewingResultId: result.id, weekendId: null }));
         },
 
         openResult: id => set({ viewingResultId: id }),
         closeResult: () => set({ viewingResultId: null }),
 
-        addTicket: title => {
-          const t = title.trim();
-          if (!t) return null;
-          const now = Date.now();
-          const ticket: Ticket = { id: uid(), title: t.slice(0, 120), createdAt: now, updatedAt: now };
-          set(s => ({ tickets: [ticket, ...s.tickets] }));
-          addLog(log('ticket_add', `Ticket opened: ${ticket.title}`, { ticketId: ticket.id }));
-          return ticket.id;
+        buyRnd: area => {
+          const s = get();
+          const lv = rndLevels(s)[area];
+          if (lv >= RND.maxLevel) return 'Fully developed.';
+          const cost = rndCost(lv);
+          const bal = balance(s);
+          if (bal < cost) return `Needs ${cost - bal} more credits. Credits come from study time.`;
+          if (seasonCapLeft(s) < cost) return 'That would break the season budget cap. It resets after the season finale.';
+          const p: Purchase = { id: uid(), t: Date.now(), area, level: lv + 1, cost, season: seasonNumber(s) };
+          set({ purchases: [...s.purchases, p] });
+          return null;
         },
-        renameTicket: (id, title) => {
-          const t = title.trim();
-          if (!t) return;
-          set(s => ({ tickets: s.tickets.map(x => (x.id === id ? { ...x, title: t.slice(0, 120), updatedAt: Date.now() } : x)) }));
-        },
-        setTicketDone: (id, done) => {
-          const now = Date.now();
-          const tk = get().tickets.find(x => x.id === id);
-          if (!tk) return;
-          set(s => ({ tickets: s.tickets.map(x => (x.id === id ? { ...x, doneAt: done ? now : undefined, updatedAt: now } : x)) }));
-          addLog(log(done ? 'ticket_done' : 'ticket_reopen', `${done ? 'Ticket closed' : 'Ticket reopened'}: ${tk.title}`, { ticketId: id }));
-        },
-        deleteTicket: id =>
-          set(s => ({ tickets: s.tickets.map(x => (x.id === id ? { ...x, deleted: true, updatedAt: Date.now() } : x)) })),
 
-        applySynced: (s, at) => set({ ...s, lastSyncAt: at }),
-        resetAll: () => set({ ...initial, hydrated: true }),
+        logActivity: (activity, minutes) => {
+          const t = Date.now();
+          const day = dayKey(t);
+          const counted = Math.max(0, Math.min(minutes, capRemaining(get().activity, activity, day)));
+          set(s => ({ activity: [{ id: uid(), t, day, activity, minutes, counted }, ...s.activity] }));
+          return { counted };
+        },
+        removeActivity: id => set(s => ({ activity: s.activity.filter(a => a.id !== id) })),
+        signContract: team => set(s => ({ contracts: [...s.contracts, { team, t: Date.now() }] })),
+        declineOffer: team => set(s => ({ declined: [...s.declined, team] })),
+
+        applySynced: (x, at) => set({ ...x, lastSyncAt: at }),
+        resetAll: () => set({ ...ledgerInit, ...uiInit, hydrated: true }),
       };
     },
     {
       name: STORE_KEY,
-      version: 2,
+      version: 3,
       storage: createJSONStorage(() => idbStorage),
-      partialize: s => ({
-        teamId: s.teamId, lastLength: s.lastLength, roundId: s.roundId, active: s.active, history: s.history,
-        tickets: s.tickets, activity: s.activity, viewingResultId: s.viewingResultId, tab: s.tab,
-        settings: s.settings, lastSyncAt: s.lastSyncAt, draftTicketId: s.draftTicketId,
-      }),
-      // Phase 1 stored everything under "pitwall:v1" with a single Lusail track.
+      partialize: s => {
+        const out: Record<string, unknown> = {};
+        for (const [k, v] of Object.entries(s)) if (typeof v !== 'function' && k !== 'hydrated') out[k] = v;
+        return out as Partial<State>;
+      },
+      // Earlier builds used a different race model. Their results stay in your history (and your
+      // study hours count), but in-flight races are dropped because they can't be replayed.
       migrate: (persisted, version) => {
-        const p = (persisted ?? {}) as Record<string, unknown> & { history?: RaceResult[]; active?: ActiveRace | null };
-        if (version < 2) {
-          const fix = <T extends { trackId?: string; roundId?: string }>(x: T): T =>
-            ({ ...x, trackId: x.trackId === 'lusail' || !x.trackId ? 'qa-2004' : x.trackId, roundId: x.roundId ?? '2026-qatar' });
-          p.history = (p.history ?? []).map(fix);
-          if (p.active) p.active = { ...p.active, updatedAt: p.active.updatedAt ?? Date.now(), config: fix(p.active.config) };
+        const p = (persisted ?? {}) as Record<string, unknown>;
+        if (version < 3) {
+          const old = (p.history as Record<string, unknown>[] | undefined) ?? [];
+          return {
+            ...ledgerInit,
+            history: old.map(h => ({
+              weekendId: '', weather: 'dry', stops: 0, tyres: ['medium'], strikes: 0, overLongPit: false, creditLines: [],
+              ...h,
+              credits: Math.round(((h.focusMs as number) ?? 0) / 60_000),
+              trackId: h.trackId === 'lusail' ? 'qa-2004' : h.trackId,
+              roundId: (h.roundId as string) ?? '2026-qatar',
+              teamId: 'kestrel',
+              points: h.format === 'sprint' ? 0 : h.points,
+              classification: ((h.classification as { code: string; teamId: TeamId; you: boolean; gap: string }[]) ?? []).map(c => ({ ...c, number: 0, dnf: c.gap === 'DNF' })),
+            })),
+          } as unknown as State;
         }
         return p as unknown as State;
       },
@@ -225,4 +272,5 @@ export const useRace = create<State>()(
   ),
 );
 
-export const liveTickets = (t: Ticket[]) => t.filter(x => !x.deleted);
+export const currentWeekend = (s: Pick<State, 'weekends' | 'weekendId'>) => s.weekends.find(w => w.id === s.weekendId) ?? null;
+export const activityLabel = (a: ActivityId) => DRIVER.activities[a].label;

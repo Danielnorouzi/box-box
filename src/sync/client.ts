@@ -3,9 +3,12 @@ import { mergeStates } from './merge';
 
 export type SyncResult = { ok: true; at: number } | { ok: false; message: string };
 
-const pick = (): SyncedState => {
+export const pick = (): SyncedState => {
   const s = useRace.getState();
-  return { teamId: s.teamId, active: s.active, history: s.history, tickets: s.tickets, activity: s.activity };
+  return {
+    driver: s.driver, driverUpdatedAt: s.driverUpdatedAt, history: s.history, weekends: s.weekends, purchases: s.purchases,
+    contracts: s.contracts, declined: s.declined, activity: s.activity, active: s.active,
+  };
 };
 
 /**
