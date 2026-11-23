@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "sim:check": "rolldown scripts/sim-check.ts --platform node -o node_modules/.cache/sim-check.mjs && node node_modules/.cache/sim-check.mjs"
+    "sim:check": "rolldown scripts/sim-check.ts --platform node -o node_modules/.cache/sim-check.mjs && node node_modules/.cache/sim-check.mjs",
+    "build:artifact": "tsc -b && vite build --mode artifact --outDir dist-artifact && node scripts/inline-artifact.mjs"
   },
   "dependencies": {
     "framer-motion": "^14.14.0",

@@ -2,10 +2,12 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
+  // `--mode artifact` builds a single-page preview without the service worker.
+  base: mode === 'artifact' ? './' : '/',
   plugins: [
     react(),
-    VitePWA({
+    mode !== 'artifact' && VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg', 'apple-touch-icon.png'],
       manifest: {
@@ -25,4 +27,4 @@ export default defineConfig({
     }),
   ],
   server: { host: true },
-});
+}));
