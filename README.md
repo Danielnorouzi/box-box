@@ -48,3 +48,9 @@ Procedural models built in code (`src/three/`): lofted car body, aerofoil wings,
 
 Circuit geometry: [bacinger/f1-circuits](https://github.com/bacinger/f1-circuits) (MIT). QR codes: qrcode-generator (MIT).
 2026 car numbers and grandstand names are from memory and may need checking. Not affiliated with Formula 1; no official marks are used.
+
+## Deploying on Render
+
+Use the Blueprint in `render.yaml` (New → Blueprint), or set a Static Site by hand:
+Build Command `npm ci && npm run build`, **Publish Directory `dist`**, Root Directory empty,
+and a rewrite `/*` → `/index.html`. Publishing the repo root serves raw source and shows a blank page.
